@@ -8,19 +8,18 @@
 // 抠图引擎（ES Module 导入，首次自动下载 AI 模型 ~40MB）
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
-// Cloudflare Worker 代理 HuggingFace API
-// 🔒 Token 存在 Worker 的环境变量里，前端永远看不到
-// 部署 Worker 后，把下面这个 URL 换成你的 Worker 地址
-const WORKER_URL = "https://virtual-tryon.963888499.workers.dev";
+// Cloudflare Worker 后端 — 所有 API 都走这里，Token 永不暴露
+const WORKER = "https://virtual-tryon.963888499.workers.dev";
+const USE_WORKER = true;
 
-// 是否启用 Worker 加速抠图（服务端处理，速度更快）
-// 浏览器本地抠图（模型下载一次约 40MB，缓存后秒出）
-const USE_WORKER = false;  // HuggingFace 国内不可达，直接用浏览器模式
-
-// Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
-function replicateFetch(path, options) {
-  const url = "https://corsproxy.io/?" + encodeURIComponent("https://api.replicate.com" + path);
-  return fetch(url, options);
+// 通过 Worker 代理所有 Replicate 请求（Token 在服务端）
+async function replicateFetch(path, options = {}) {
+  const resp = await fetch(WORKER + "/proxy" + path, options);
+  if (!resp.ok) {
+    const err = await resp.text().catch(() => resp.statusText);
+    throw new Error(err || "HTTP " + resp.status);
+  }
+  return resp;
 }
 
 // ============================================================
@@ -464,11 +463,11 @@ async function handleBgResult(resultBlob) {
     showToast("抠图完成！✅ 细节不满意可点「手动修边」");
 }
 
-// Worker 代理抠图（Token 在服务端，前端不暴露）
+// Worker 代理抠图
 async function removeBgViaWorker(file) {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 30000);
-    const resp = await fetch(WORKER_URL, {
+    const t = setTimeout(() => ctrl.abort(), 60000);
+    const resp = await fetch(WORKER + "/remove-bg", {
         method: "POST",
         body: file,
         signal: ctrl.signal,
