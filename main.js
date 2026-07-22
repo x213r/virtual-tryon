@@ -484,11 +484,14 @@ $("#btnRemoveBg").addEventListener("click", async () => {
 
     // 尝试走后端（快，不用下载）
     if (BACKEND_URL) {
+        showLoading("服务器抠图中...", "无需下载模型，约 5-15 秒 ⚡");
         try {
             const blob = await removeBgViaBackend(bgFile);
-            handleBgResult(blob);
+            await handleBgResult(blob);
+            hideLoading();
             return;
         } catch (e) {
+            hideLoading();
             console.warn("后端抠图失败，回退到浏览器抠图:", e.message);
         }
     }
