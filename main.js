@@ -8,9 +8,10 @@
 // 抠图引擎（ES Module 导入，首次自动下载 AI 模型 ~40MB）
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
-// 后端 API 地址（部署 Render 后更新这个地址）
+// HuggingFace API 抠图（需要自己的 Token）
+// 去 https://huggingface.co/settings/tokens 创建免费 Token
 const HF_API = "https://api-inference.huggingface.co/models/not-lain/rembg";
-const HF_TOKEN = "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";
+const HF_TOKEN = "";  // ← 在这填你的 HF Token，留空则自动用浏览器本地抠图
 
 // Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
 function replicateFetch(path, options) {
@@ -478,19 +479,21 @@ async function removeBgViaHF(file) {
 $("#btnRemoveBg").addEventListener("click", async () => {
     if (!bgFile) return;
 
-    // 优先走 HuggingFace API（免下载）
-    showLoading("HF API 抠图中...", "免费，约 5-10 秒 ⚡");
-    try {
-        const blob = await removeBgViaHF(bgFile);
-        await handleBgResult(blob);
-        hideLoading();
-        return;
-    } catch (e) {
-        hideLoading();
-        console.warn("HF API 失败，切回浏览器本地:", e.message);
+    // 如果配置了 HF Token，优先走 HuggingFace API（速度快，免下载模型）
+    if (HF_TOKEN) {
+        showLoading("HF API 抠图中...", "免费，约 5-10 秒 ⚡");
+        try {
+            const blob = await removeBgViaHF(bgFile);
+            await handleBgResult(blob);
+            hideLoading();
+            return;
+        } catch (e) {
+            hideLoading();
+            console.warn("HF API 失败，切回浏览器本地:", e.message);
+        }
     }
 
-    // 浏览器本地兜底
+    // 浏览器本地抠图（无需任何 Token，完全免费）
     showLoading("正在下载 AI 模型（首次使用）...", "模型约 40MB，下次无需下载");
     try {
         const resultBlob = await removeBackground(bgFile, {
@@ -1048,8 +1051,13 @@ function init() {
     const dot = $("#statusDot");
     const text = $("#statusText");
 
-    dot.className = "status-dot online";
-    text.textContent = "HF API 就绪 ⚡";
+    if (HF_TOKEN) {
+        dot.className = "status-dot online";
+        text.textContent = "HF API 就绪 ⚡";
+    } else {
+        dot.className = "status-dot online";
+        text.textContent = "浏览器抠图模式 ✅";
+    }
 
     // 恢复已保存的 API Key
     updateTryOnUI();
