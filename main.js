@@ -797,7 +797,6 @@ function inpaintWatermarkTelea() {
                     if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
                     const ni = ny * w + nx;
                     if (maskedSet.has(ni)) continue; // 跳过未填充的
-                    if (mask[ni * 4] >= 128 && !maskedSet.has(ni)) continue;
 
                     const dist = Math.sqrt(dx * dx + dy * dy);
                     if (dist < 0.5) continue;
