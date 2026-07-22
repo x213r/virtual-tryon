@@ -779,7 +779,7 @@ function inpaintWatermarkTelea() {
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
                     const ni = ny * w + nx;
-                    if (!maskedSet.has(ni) && mask[ni * 4] < 128) hasKnown = true;
+                    if (!maskedSet.has(ni)) hasKnown = true;
                 }
             }
             if (hasKnown) edgePixels.push(i);
