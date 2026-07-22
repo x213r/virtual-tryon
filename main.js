@@ -11,7 +11,7 @@ import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background
 // Cloudflare Worker 代理 HuggingFace API
 // 🔒 Token 存在 Worker 的环境变量里，前端永远看不到
 // 部署 Worker 后，把下面这个 URL 换成你的 Worker 地址
-const WORKER_URL = "https://virtual-tryon.workers.dev";  // ← 改成你的实际 Worker URL
+const WORKER_URL = "https://virtual-tryon.963888499.workers.dev";
 
 // 是否启用 Worker 加速抠图（服务端处理，速度更快）
 const USE_WORKER = true;
