@@ -9,7 +9,8 @@
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
 // 后端 API 地址（部署 Render 后更新这个地址）
-// 纯浏览器本地抠图，无需任何 API Token
+const HF_API = "https://api-inference.huggingface.co/models/not-lain/rembg";
+const HF_TOKEN = "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";
 
 // Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
 function replicateFetch(path, options) {
@@ -458,11 +459,38 @@ async function handleBgResult(resultBlob) {
     showToast("抠图完成！✅ 细节不满意可点「手动修边」");
 }
 
+// HF API 抠图
+async function removeBgViaHF(file) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 30000);
+    const resp = await fetch(HF_API, {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + HF_TOKEN },
+        body: file,
+        signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!resp.ok) throw new Error("HF API: " + (await resp.text().catch(() => resp.status)));
+    return await resp.blob();
+}
+
 // 抠图按钮点击
 $("#btnRemoveBg").addEventListener("click", async () => {
     if (!bgFile) return;
 
-    // 浏览器端抠图
+    // 优先走 HuggingFace API（免下载）
+    showLoading("HF API 抠图中...", "免费，约 5-10 秒 ⚡");
+    try {
+        const blob = await removeBgViaHF(bgFile);
+        await handleBgResult(blob);
+        hideLoading();
+        return;
+    } catch (e) {
+        hideLoading();
+        console.warn("HF API 失败，切回浏览器本地:", e.message);
+    }
+
+    // 浏览器本地兜底
     showLoading("正在下载 AI 模型（首次使用）...", "模型约 40MB，下次无需下载");
     try {
         const resultBlob = await removeBackground(bgFile, {
@@ -1021,7 +1049,7 @@ function init() {
     const text = $("#statusText");
 
     dot.className = "status-dot online";
-    text.textContent = "就绪 ✅";
+    text.textContent = "HF API 就绪 ⚡";
 
     // 恢复已保存的 API Key
     updateTryOnUI();
