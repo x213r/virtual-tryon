@@ -8,9 +8,11 @@
 // 抠图引擎（ES Module 导入，首次自动下载 AI 模型 ~40MB）
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
-// Replicate API 代理（Cloudflare Worker，解决 CORS 问题）
-// 还没部署的话，用默认值；部署后改成你的 worker 地址
-const PROXY_URL = "https://YOUR-WORKER.workers.dev/api/replicate";
+// Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
+function replicateFetch(path, options) {
+  const url = "https://corsproxy.io/?" + encodeURIComponent("https://api.replicate.com" + path);
+  return fetch(url, options);
+}
 
 // ============================================================
 //  工具函数
@@ -295,7 +297,7 @@ async function uploadToReplicate(file, token) {
     const formData = new FormData();
     formData.append("content", file);
 
-    const resp = await fetch(PROXY_URL + "/v1/files", {
+    const resp = await replicateFetch("/v1/files", {
         method: "POST",
         headers: { "Authorization": "Token " + token },
         body: formData,
@@ -315,7 +317,7 @@ async function uploadToReplicate(file, token) {
 
 // 创建试穿任务并等待结果
 async function runTryOnPrediction(personUrl, clothUrl, token) {
-    const resp = await fetch(PROXY_URL + "/v1/predictions", {
+    const resp = await replicateFetch("/v1/predictions", {
         method: "POST",
         headers: {
             "Authorization": "Token " + token,
@@ -345,7 +347,7 @@ async function runTryOnPrediction(personUrl, clothUrl, token) {
         await sleep(5000);
         attempts++;
 
-        const pollResp = await fetch(PROXY_URL + "/v1/predictions/" + predictionId, {
+        const pollResp = await replicateFetch("/v1/predictions/" + predictionId, {
             headers: { "Authorization": "Token " + token },
         });
 
