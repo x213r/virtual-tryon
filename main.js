@@ -453,6 +453,254 @@ $("#apiKeyInput").addEventListener("keydown", (e) => {
 });
 
 // ============================================================
+//  一键去水印 — Canvas 涂抹 + 像素补全（纯 JS，不需要额外模块）
+// ============================================================
+let wmFile = null;
+let wmImage = null;         // 原始图片 Image 对象
+let wmMaskCanvas = null;    // 遮罩层（用户涂抹的水印区域）
+let wmMaskCtx = null;
+let wmDisplayCanvas = null; // 显示层（原图 + 遮罩叠加）
+let wmDisplayCtx = null;
+let wmCurrentTool = "brush";
+let wmBrushSize = 20;
+let wmIsDrawing = false;
+
+setupUpload({
+    cardId: "wmCard",
+    uploadId: "wmUpload",
+    inputId: "wmInput",
+    clearId: "wmClear",
+    previewId: "wmPreview",
+    onImageReady: (file) => {
+        wmFile = file;
+        if (file) {
+            loadWatermarkImage(file);
+        } else {
+            $("#wmEditor").style.display = "none";
+            $("#wmResult").style.display = "none";
+        }
+    }
+});
+
+function loadWatermarkImage(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            wmImage = img;
+            setupWatermarkCanvas(img);
+            $("#wmEditor").style.display = "block";
+            $("#wmResult").style.display = "none";
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function setupWatermarkCanvas(img) {
+    const canvas = $("#wmCanvas");
+    const maxW = 780;
+    const scale = Math.min(1, maxW / img.width);
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    canvas.style.width = canvas.width + "px";
+    canvas.style.height = canvas.height + "px";
+
+    // 显示层
+    wmDisplayCanvas = canvas;
+    wmDisplayCtx = canvas.getContext("2d");
+    wmDisplayCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    // 遮罩层（不可见，存储涂抹数据）
+    wmMaskCanvas = document.createElement("canvas");
+    wmMaskCanvas.width = canvas.width;
+    wmMaskCanvas.height = canvas.height;
+    wmMaskCtx = wmMaskCanvas.getContext("2d");
+    wmMaskCtx.fillStyle = "black";
+    wmMaskCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 事件
+    canvas.onmousedown = (e) => { wmIsDrawing = true; wmDraw(e); };
+    canvas.onmousemove = (e) => { if (wmIsDrawing) wmDraw(e); };
+    canvas.onmouseup = () => { wmIsDrawing = false; };
+    canvas.onmouseleave = () => { wmIsDrawing = false; };
+    canvas.ontouchstart = (e) => { e.preventDefault(); wmIsDrawing = true; wmDraw(e.touches[0]); };
+    canvas.ontouchmove = (e) => { e.preventDefault(); if (wmIsDrawing) wmDraw(e.touches[0]); };
+    canvas.ontouchend = () => { wmIsDrawing = false; };
+}
+
+function wmDraw(e) {
+    const rect = wmDisplayCanvas.getBoundingClientRect();
+    const scaleX = wmDisplayCanvas.width / rect.width;
+    const scaleY = wmDisplayCanvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    // 在遮罩层画（白色=水印区域要移除，黑色=保留）
+    wmMaskCtx.beginPath();
+    wmMaskCtx.arc(x, y, wmBrushSize / 2, 0, Math.PI * 2);
+    wmMaskCtx.fillStyle = wmCurrentTool === "brush" ? "white" : "black";
+    wmMaskCtx.fill();
+
+    // 在显示层画半透明提示
+    wmDisplayCtx.beginPath();
+    wmDisplayCtx.arc(x, y, wmBrushSize / 2, 0, Math.PI * 2);
+    wmDisplayCtx.fillStyle = wmCurrentTool === "brush"
+        ? "rgba(255, 0, 0, 0.35)"  // 红色=标记水印
+        : "rgba(0, 0, 0, 0.01)";   // 透明=橡皮擦
+    wmDisplayCtx.fill();
+}
+
+// 工具切换
+$$(".wm-tool-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+        $$(".wm-tool-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        wmCurrentTool = btn.dataset.tool;
+    });
+});
+
+// 画笔大小
+$("#wmBrushSize").addEventListener("input", (e) => {
+    wmBrushSize = parseInt(e.target.value);
+    $("#wmBrushSizeVal").textContent = wmBrushSize + "px";
+});
+
+// 去除水印按钮
+$("#btnRemoveWatermark").addEventListener("click", async () => {
+    if (!wmImage) return;
+    showLoading("正在去除水印...", "像素补全算法处理中");
+    await sleep(100); // 让 loading 显示出来
+
+    try {
+        const resultBlob = await inpaintWatermark();
+        const resultUrl = URL.createObjectURL(resultBlob);
+
+        $("#wmOriginal").src = URL.createObjectURL(wmFile);
+        $("#wmOutput").src = resultUrl;
+        $("#wmDownload").href = resultUrl;
+        $("#wmResult").style.display = "block";
+        $("#wmResult").scrollIntoView({ behavior: "smooth" });
+        showToast("去水印完成！");
+    } catch (err) {
+        showToast("去水印失败：" + (err.message || "未知错误"), true);
+    } finally {
+        hideLoading();
+    }
+});
+
+// 像素补全算法：用周围像素填充遮罩区域
+function inpaintWatermark() {
+    const w = wmDisplayCanvas.width;
+    const h = wmDisplayCanvas.height;
+
+    // 获取原图像素
+    wmDisplayCtx.drawImage(wmImage, 0, 0, w, h); // 重绘原图
+    const srcData = wmDisplayCtx.getImageData(0, 0, w, h);
+    const src = srcData.data;
+
+    // 获取遮罩
+    const maskData = wmMaskCtx.getImageData(0, 0, w, h);
+    const mask = maskData.data;
+
+    // 找出遮罩像素
+    const maskedPixels = [];
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            if (mask[i] > 128) { // 白色=要填充
+                maskedPixels.push({ x, y });
+            }
+        }
+    }
+
+    if (maskedPixels.length === 0) {
+        return new Promise(resolve => {
+            wmDisplayCanvas.toBlob(blob => resolve(blob), "image/png");
+        });
+    }
+
+    // 多层补全（从边缘向内部填充）
+    const maxRadius = 30;
+    const passes = 3;
+    const result = new Uint8ClampedArray(src);
+
+    for (let pass = 0; pass < passes; pass++) {
+        const tempResult = new Uint8ClampedArray(result);
+
+        for (const { x, y } of maskedPixels) {
+            let r = 0, g = 0, b = 0, count = 0;
+
+            // 从周围采样非遮罩像素
+            for (let radius = 2; radius <= maxRadius && count === 0; radius++) {
+                for (let dy = -radius; dy <= radius; dy++) {
+                    for (let dx = -radius; dx <= radius; dx++) {
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+
+                        const ni = (ny * w + nx) * 4;
+                        if (mask[ni] < 128) { // 非遮罩像素
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            const weight = 1 / (1 + dist);
+                            r += tempResult[ni] * weight;
+                            g += tempResult[ni + 1] * weight;
+                            b += tempResult[ni + 2] * weight;
+                            count += weight;
+                        }
+                    }
+                }
+                if (count > 0) break; // 找到足够近的像素就停止扩大搜索
+            }
+
+            if (count > 0) {
+                const i = (y * w + x) * 4;
+                result[i] = r / count;
+                result[i + 1] = g / count;
+                result[i + 2] = b / count;
+                // result[i+3] 保持 alpha 不变
+            }
+        }
+
+        // 把已填充的像素从遮罩中移除（让内层像素也能采样到新填充的值）
+        if (pass < passes - 1) {
+            for (const { x, y } of maskedPixels) {
+                const i = (y * w + x) * 4;
+                if (mask[i] > 128) {
+                    // 检查是否已有邻居被填充
+                    let hasFilled = false;
+                    for (let dy = -1; dy <= 1 && !hasFilled; dy++) {
+                        for (let dx = -1; dx <= 1 && !hasFilled; dx++) {
+                            const ni = ((y + dy) * w + (x + dx)) * 4;
+                            if (mask[ni] < 128) hasFilled = true;
+                        }
+                    }
+                    if (hasFilled) {
+                        mask[i] = 100; // 标记为已填充，下一轮作为可用采样源
+                    }
+                }
+            }
+            // 将标记的像素转为可用源
+            for (const { x, y } of maskedPixels) {
+                const i = (y * w + x) * 4;
+                if (mask[i] === 100) mask[i] = 0;
+            }
+        }
+    }
+
+    // 最终输出
+    const outData = new ImageData(result, w, h);
+    const outCanvas = document.createElement("canvas");
+    outCanvas.width = w;
+    outCanvas.height = h;
+    outCanvas.getContext("2d").putImageData(outData, 0, 0);
+
+    return new Promise(resolve => {
+        outCanvas.toBlob(blob => resolve(blob), "image/png");
+    });
+}
+
+// ============================================================
 //  初始化
 // ============================================================
 function init() {

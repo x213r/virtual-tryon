@@ -443,6 +443,66 @@ body {
 .toast.show { transform: translateX(-50%) translateY(0); }
 .toast.error { background: #ef4444; }
 
+/* ========== Watermark Editor ========== */
+.watermark-editor {
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 0 20px;
+}
+.wm-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 16px;
+    background: var(--card);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    margin-bottom: 12px;
+}
+.wm-tool-btn {
+    padding: 8px 18px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all .15s;
+}
+.wm-tool-btn.active {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    color: var(--primary);
+}
+.wm-brush-size {
+    font-size: 14px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.wm-brush-size input[type="range"] {
+    width: 80px;
+    accent-color: var(--primary);
+}
+.wm-canvas-wrap {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 300px;
+}
+.wm-canvas-wrap canvas {
+    max-width: 100%;
+    cursor: crosshair;
+    display: block;
+}
+
 /* ========== Responsive ========== */
 @media (max-width: 768px) {
     .header { padding: 0 16px; }
