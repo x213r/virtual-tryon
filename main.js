@@ -549,8 +549,8 @@ function wmDraw(e) {
     wmDisplayCtx.beginPath();
     wmDisplayCtx.arc(x, y, wmBrushSize / 2, 0, Math.PI * 2);
     if (wmCurrentTool === "brush") {
-        // 红色半透明 = 标记水印区域
-        wmDisplayCtx.fillStyle = "rgba(255, 0, 0, 0.35)";
+        // 红色标记水印区域（50% 透明度，比之前更清晰）
+        wmDisplayCtx.fillStyle = "rgba(255, 50, 50, 0.5)";
         wmDisplayCtx.fill();
     } else {
         // 橡皮擦：恢复显示原图
@@ -739,7 +739,7 @@ function autoDetectWatermarks() {
     return Math.round(markedCount / 100); // 近似水印数量
 }
 
-// 改进版加权采样修复（边缘优先 + 多轮填充 + 颜色相似度加权）
+// 简单直接的全像素修复（边缘向内多轮填充 + 大数据量搜索）
 function inpaintWatermarkTelea() {
     const w = wmDisplayCanvas.width, h = wmDisplayCanvas.height;
     wmDisplayCtx.drawImage(wmImage, 0, 0, w, h);
@@ -748,32 +748,29 @@ function inpaintWatermarkTelea() {
     const maskData = wmMaskCtx.getImageData(0, 0, w, h);
     const mask = maskData.data;
 
-    // 收集所有需要填充的像素
-    const allMasked = [];
+    // 收集所有待填充像素
+    const maskedSet = new Set();
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-            if (mask[(y * w + x) * 4] > 128) {
-                allMasked.push(y * w + x);
-            }
+            const i = y * w + x;
+            if (mask[i * 4] > 128) maskedSet.add(i);
         }
     }
 
-    if (allMasked.length === 0) {
+    if (maskedSet.size === 0) {
         return new Promise(resolve => wmDisplayCanvas.toBlob(blob => resolve(blob), "image/png"));
     }
 
-    // 逐轮填充：每轮只填充边缘像素，然后扩展边缘
-    const maxPasses = 20;
-    const searchRadius = 12;
-    const filled = new Uint8Array(w * h); // 本轮已填充标记
+    // 多轮填充：每轮只处理边缘像素，逐轮向内推进
+    let filledAny = true;
+    const maxPasses = 500; // 支持大区域
+    const radius = 10;
 
-    for (let pass = 0; pass < maxPasses; pass++) {
-        const toFillThisPass = [];
-        const remaining = [];
+    for (let pass = 0; pass < maxPasses && maskedSet.size > 0 && filledAny; pass++) {
+        filledAny = false;
+        const edgePixels = [];
 
-        for (const i of allMasked) {
-            if (filled[i]) continue;
-            // 检查是否有已知邻居（原始已知 或 前几轮已填充）
+        for (const i of maskedSet) {
             const x = i % w, y = Math.floor(i / w);
             let hasKnown = false;
             for (let dy = -1; dy <= 1 && !hasKnown; dy++) {
@@ -782,53 +779,32 @@ function inpaintWatermarkTelea() {
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
                     const ni = ny * w + nx;
-                    if (mask[ni * 4] < 128 || filled[ni]) {
-                        hasKnown = true;
-                    }
+                    if (!maskedSet.has(ni) && mask[ni * 4] < 128) hasKnown = true;
                 }
             }
-            if (hasKnown) {
-                toFillThisPass.push(i);
-            } else {
-                remaining.push(i);
-            }
+            if (hasKnown) edgePixels.push(i);
         }
 
-        if (toFillThisPass.length === 0) break; // 没有更多可填充的
-
-        // 填充本轮像素
-        for (const idx of toFillThisPass) {
+        // 填充边缘像素
+        for (const idx of edgePixels) {
             const x = idx % w, y = Math.floor(idx / w);
             let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
             const si = idx * 4;
-            const srcR = src[si], srcG = src[si + 1], srcB = src[si + 2];
 
-            for (let dy = -searchRadius; dy <= searchRadius; dy++) {
-                for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+            for (let dy = -radius; dy <= radius; dy++) {
+                for (let dx = -radius; dx <= radius; dx++) {
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
                     const ni = ny * w + nx;
-                    // 只采样已知像素
-                    if (mask[ni * 4] > 128 && !filled[ni]) continue;
+                    if (maskedSet.has(ni)) continue; // 跳过未填充的
+                    if (mask[ni * 4] >= 128 && !maskedSet.has(ni)) continue;
 
                     const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < 1) continue; // 不采样自己
-                    if (dist > searchRadius) continue;
-
-                    // 颜色相似度权重（采样与周围像素相近的颜色）
-                    const ns = src[ni * 4], ng = src[ni * 4 + 1], nb = src[ni * 4 + 2];
-                    const colorDiff = Math.sqrt(
-                        (ns - srcR) ** 2 + (ng - srcG) ** 2 + (nb - srcB) ** 2
-                    ) / 255;
-                    const colorWeight = 1 / (1 + colorDiff * 3);
-
-                    // 距离权重（近的权重大）
-                    const distWeight = 1 / (dist * dist);
-
-                    const weight = distWeight * colorWeight;
-                    rSum += ns * weight;
-                    gSum += ng * weight;
-                    bSum += nb * weight;
+                    if (dist < 0.5) continue;
+                    const weight = 1 / (dist * dist);
+                    rSum += src[ni * 4] * weight;
+                    gSum += src[ni * 4 + 1] * weight;
+                    bSum += src[ni * 4 + 2] * weight;
                     wSum += weight;
                 }
             }
@@ -837,7 +813,9 @@ function inpaintWatermarkTelea() {
                 src[si] = Math.round(rSum / wSum);
                 src[si + 1] = Math.round(gSum / wSum);
                 src[si + 2] = Math.round(bSum / wSum);
-                filled[idx] = 1;
+                src[si + 3] = 255; // 强制不透明
+                maskedSet.delete(idx);
+                filledAny = true;
             }
         }
     }
