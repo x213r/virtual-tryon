@@ -8,9 +8,6 @@
 // 抠图引擎（ES Module 导入，首次自动下载 AI 模型 ~40MB）
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
-// 模型下载 CDN：国内用阿里镜像，速度快；海外用默认 staticimgly
-const MODEL_CDN = "https://registry.npmmirror.com/@imgly/background-removal-data/1.4.5/files/dist/";
-
 // ============================================================
 //  工具函数
 // ============================================================
@@ -407,8 +404,7 @@ $("#btnRemoveBg").addEventListener("click", async () => {
 
     try {
         const resultBlob = await removeBackground(bgFile, {
-            publicPath: MODEL_CDN,
-            model: "medium",
+            model: "small",
             output: {
                 type: "image/png",
                 quality: 1.0,
