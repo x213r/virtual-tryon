@@ -1,5 +1,7 @@
-fastapi
-uvicorn[standard]
-rembg
-aiofiles
-python-multipart
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+rembg==2.0.60
+onnxruntime==1.19.2
+aiofiles==24.1.0
+python-multipart==0.0.9
+numpy<2.0
