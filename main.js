@@ -8,6 +8,9 @@
 // 抠图引擎（ES Module 导入，首次自动下载 AI 模型 ~40MB）
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
+// 后端 API 地址（部署 Render 后更新这个地址）
+let BACKEND_URL = "";
+
 // Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
 function replicateFetch(path, options) {
   const url = "https://corsproxy.io/?" + encodeURIComponent("https://api.replicate.com" + path);
@@ -429,12 +432,69 @@ setupUpload({
     }
 });
 
+// 后端抠图（快，不用下载模型）
+async function removeBgViaBackend(file) {
+    const formData = new FormData();
+    formData.append("image", file);
+
+    const resp = await fetch(BACKEND_URL + "/api/remove-bg", {
+        method: "POST",
+        body: formData,
+    });
+    const data = await resp.json();
+
+    if (!data.ok) throw new Error(data.message || "后端抠图失败");
+
+    // base64 转 Blob
+    const byteString = atob(data.image_base64);
+    const bytes = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+    return new Blob([bytes], { type: "image/png" });
+}
+
+// 统一的结果处理
+async function handleBgResult(resultBlob) {
+    const resultImg = await loadImageFromBlob(resultBlob);
+    const origImg = await loadImageFromBlob(bgFile);
+
+    if (resultImg.width !== origImg.width || resultImg.height !== origImg.height) {
+        const canvas = document.createElement("canvas");
+        canvas.width = origImg.width;
+        canvas.height = origImg.height;
+        canvas.getContext("2d").drawImage(resultImg, 0, 0, canvas.width, canvas.height);
+        bgResultBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+    } else {
+        bgResultBlob = resultBlob;
+    }
+
+    bgResultUrl = URL.createObjectURL(bgResultBlob);
+    bgOrigUrl = URL.createObjectURL(bgFile);
+
+    $("#bgOriginal").src = bgOrigUrl;
+    $("#bgOutput").src = bgResultUrl;
+    $("#bgDownload").href = bgResultUrl;
+    $("#bgResult").style.display = "block";
+    $("#bgResult").scrollIntoView({ behavior: "smooth" });
+    showToast("抠图完成！✅ 细节不满意可点「手动修边」");
+}
+
 // 抠图按钮点击
 $("#btnRemoveBg").addEventListener("click", async () => {
     if (!bgFile) return;
 
-    showLoading("正在下载 AI 模型（首次使用）...", "模型约 40MB，下次使用无需下载");
+    // 尝试走后端（快，不用下载）
+    if (BACKEND_URL) {
+        try {
+            const blob = await removeBgViaBackend(bgFile);
+            handleBgResult(blob);
+            return;
+        } catch (e) {
+            console.warn("后端抠图失败，回退到浏览器抠图:", e.message);
+        }
+    }
 
+    // 浏览器端抠图（需下载模型）
+    showLoading("正在下载 AI 模型（首次使用）...", "模型约 40MB，下次无需下载");
     try {
         const resultBlob = await removeBackground(bgFile, {
             model: "isnet_quint8",
@@ -454,31 +514,7 @@ $("#btnRemoveBg").addEventListener("click", async () => {
             },
         });
 
-        // 检查尺寸，如果AI缩小了就放大回原图尺寸
-        const resultImg = await loadImageFromBlob(resultBlob);
-        const origImg = await loadImageFromBlob(bgFile);
-
-        if (resultImg.width !== origImg.width || resultImg.height !== origImg.height) {
-            const canvas = document.createElement("canvas");
-            canvas.width = origImg.width;
-            canvas.height = origImg.height;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(resultImg, 0, 0, canvas.width, canvas.height);
-            bgResultBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
-        } else {
-            bgResultBlob = resultBlob;
-        }
-
-        bgResultUrl = URL.createObjectURL(bgResultBlob);
-        bgOrigUrl = URL.createObjectURL(bgFile);
-
-        // 显示结果
-        $("#bgOriginal").src = bgOrigUrl;
-        $("#bgOutput").src = bgResultUrl;
-        $("#bgDownload").href = bgResultUrl;
-        $("#bgResult").style.display = "block";
-        $("#bgResult").scrollIntoView({ behavior: "smooth" });
-        showToast("抠图完成！✅ 细节不满意可点「手动修边」");
+        await handleBgResult(resultBlob);
     } catch (err) {
         showToast("抠图失败：" + (err.message || "未知错误"), true);
     } finally {
@@ -1015,9 +1051,17 @@ function init() {
     const dot = $("#statusDot");
     const text = $("#statusText");
 
-    // ES Module 导入成功 = 抠图引擎就绪
     dot.className = "status-dot online";
-    text.textContent = "抠图就绪 ✅";
+
+    if (BACKEND_URL) {
+        // 检测后端是否在线
+        fetch(BACKEND_URL + "/")
+            .then(r => r.json())
+            .then(() => { text.textContent = "后端就绪 ⚡"; })
+            .catch(() => { text.textContent = "本地抠图 ✅"; });
+    } else {
+        text.textContent = "本地抠图 ✅";
+    }
 
     // 恢复已保存的 API Key
     updateTryOnUI();
