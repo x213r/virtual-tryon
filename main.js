@@ -14,7 +14,8 @@ import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background
 const WORKER_URL = "https://virtual-tryon.963888499.workers.dev";
 
 // 是否启用 Worker 加速抠图（服务端处理，速度更快）
-const USE_WORKER = true;
+// 浏览器本地抠图（模型下载一次约 40MB，缓存后秒出）
+const USE_WORKER = false;  // HuggingFace 国内不可达，直接用浏览器模式
 
 // Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
 function replicateFetch(path, options) {
@@ -1056,7 +1057,7 @@ function init() {
 
     if (USE_WORKER) {
         dot.className = "status-dot online";
-        text.textContent = "Worker 加速就绪 ⚡";
+        text.textContent = "Worker 加速 ⚡";
     } else {
         dot.className = "status-dot online";
         text.textContent = "浏览器抠图模式 ✅";
