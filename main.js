@@ -5,6 +5,9 @@
  * 🔒 虚拟试穿：需 Replicate API Key，输入 Key 后解锁
  */
 
+// 抠图引擎（ES Module 导入，首次自动下载 AI 模型 ~40MB）
+import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
+
 // ============================================================
 //  工具函数
 // ============================================================
@@ -33,28 +36,6 @@ function updateLoading(text, sub) {
 
 function hideLoading() {
     $("#loadingOverlay").classList.remove("show");
-}
-
-// ============================================================
-//  抠图引擎检测
-// ============================================================
-function getRemoveBgFn() {
-    // @imgly/background-removal IIFE 构建可能暴露不同的全局变量
-    if (typeof imglyBackgroundRemoval !== "undefined" && imglyBackgroundRemoval.removeBackground) {
-        return imglyBackgroundRemoval.removeBackground;
-    }
-    if (typeof removeBackground === "function") {
-        return removeBackground;
-    }
-    // 有些版本挂载在 window 上
-    if (window.removeBackground && typeof window.removeBackground === "function") {
-        return window.removeBackground;
-    }
-    return null;
-}
-
-function isBgRemovalReady() {
-    return getRemoveBgFn() !== null;
 }
 
 // ============================================================
@@ -419,16 +400,10 @@ setupUpload({
 $("#btnRemoveBg").addEventListener("click", async () => {
     if (!bgFile) return;
 
-    const removeBg = getRemoveBgFn();
-    if (!removeBg) {
-        showToast("抠图引擎加载失败，请刷新页面重试", true);
-        return;
-    }
-
     showLoading("正在下载 AI 模型（首次使用）...", "模型约 40MB，下次使用无需下载");
 
     try {
-        const resultBlob = await removeBg(bgFile, {
+        const resultBlob = await removeBackground(bgFile, {
             model: "isnet-general-use",
             output: {
                 type: "image/png",
@@ -479,24 +454,9 @@ function init() {
     const dot = $("#statusDot");
     const text = $("#statusText");
 
-    // 检查抠图引擎
-    if (isBgRemovalReady()) {
-        dot.className = "status-dot online";
-        text.textContent = "抠图就绪 ✅";
-    } else {
-        // 可能还在加载 CDN 脚本，等 2 秒再试
-        dot.className = "status-dot";
-        text.textContent = "加载中...";
-        setTimeout(() => {
-            if (isBgRemovalReady()) {
-                dot.className = "status-dot online";
-                text.textContent = "抠图就绪 ✅";
-            } else {
-                dot.className = "status-dot offline";
-                text.textContent = "抠图引擎加载失败";
-            }
-        }, 3000);
-    }
+    // ES Module 导入成功 = 抠图引擎就绪
+    dot.className = "status-dot online";
+    text.textContent = "抠图就绪 ✅";
 
     // 恢复已保存的 API Key
     updateTryOnUI();
