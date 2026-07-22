@@ -393,6 +393,20 @@ let bgResultBlob = null;
 let bgResultUrl = null;
 let bgOrigUrl = null;
 
+function resetBgResult() {
+    bgResultBlob = null;
+    bgResultUrl = null;
+    bgOrigUrl = null;
+    $("#bgResult").style.display = "none";
+    $("#bgEditor").style.display = "none";
+    $("#bgOutput").src = "";
+    $("#bgOriginal").src = "";
+    $("#bgDownload").href = "";
+    bgEditCanvas = null;
+    bgEditCtx = null;
+    bgEditOrigImg = null;
+}
+
 setupUpload({
     cardId: "bgCard",
     uploadId: "bgUpload",
@@ -401,6 +415,7 @@ setupUpload({
     previewId: "bgPreview",
     onImageReady: (file) => {
         bgFile = file;
+        resetBgResult();
         $("#btnRemoveBg").disabled = !file;
     }
 });
