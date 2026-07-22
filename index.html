@@ -61,8 +61,24 @@
                             <div class="compare-img-wrapper checker-bg"><img id="bgOutput" alt=""></div>
                         </div>
                     </div>
+                    <button class="btn-edit-mode" id="btnBgEdit">🖌️ 手动修边</button>
                     <a class="btn-download" id="bgDownload" download="nobg_result.png">📥 下载 PNG</a>
                 </div>
+            </div>
+
+            <!-- 手动修边编辑器 -->
+            <div class="watermark-editor" id="bgEditor" style="display:none;">
+                <div class="wm-toolbar">
+                    <button class="wm-tool-btn active" data-tool="bgBrush">🧹 擦除（去背景）</button>
+                    <button class="wm-tool-btn" data-tool="bgEraser">↩️ 恢复（还原）</button>
+                    <span class="wm-brush-size">
+                        画笔大小: <input type="range" id="bgBrushSize" min="5" max="60" value="15"> <span id="bgBrushSizeVal">15px</span>
+                    </span>
+                </div>
+                <div class="wm-canvas-wrap">
+                    <canvas id="bgEditCanvas"></canvas>
+                </div>
+                <p class="feature-note" style="margin-top:8px;">💡 在需要修的区域上涂抹，完成后点下方下载</p>
             </div>
         </section>
 

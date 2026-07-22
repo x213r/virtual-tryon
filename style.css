@@ -476,7 +476,7 @@ body {
     background: var(--primary-light);
     color: var(--primary);
 }
-.btn-auto-detect {
+.btn-auto-detect, .btn-edit-mode {
     padding: 8px 20px;
     background: #f0f9ff;
     color: #0284c7;
@@ -486,8 +486,9 @@ body {
     font-size: 14px;
     cursor: pointer;
     transition: all .15s;
+    margin: 0 6px;
 }
-.btn-auto-detect:hover { background: #e0f2fe; }
+.btn-auto-detect:hover, .btn-edit-mode:hover { background: #e0f2fe; }
 
 .wm-brush-size {
     font-size: 14px;

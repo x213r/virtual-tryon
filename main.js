@@ -389,6 +389,9 @@ function sleep(ms) {
 //  一键抠图 — 上传逻辑
 // ============================================================
 let bgFile = null;
+let bgResultBlob = null;
+let bgResultUrl = null;
+let bgOrigUrl = null;
 
 setupUpload({
     cardId: "bgCard",
@@ -427,19 +430,126 @@ $("#btnRemoveBg").addEventListener("click", async () => {
             },
         });
 
+        // 存储结果供手动修边使用
+        bgResultBlob = resultBlob;
+        bgResultUrl = URL.createObjectURL(resultBlob);
+        bgOrigUrl = URL.createObjectURL(bgFile);
+
         // 显示结果
-        const resultUrl = URL.createObjectURL(resultBlob);
-        $("#bgOriginal").src = URL.createObjectURL(bgFile);
-        $("#bgOutput").src = resultUrl;
-        $("#bgDownload").href = resultUrl;
+        $("#bgOriginal").src = bgOrigUrl;
+        $("#bgOutput").src = bgResultUrl;
+        $("#bgDownload").href = bgResultUrl;
         $("#bgResult").style.display = "block";
         $("#bgResult").scrollIntoView({ behavior: "smooth" });
-        showToast("抠图完成！✅");
+        showToast("抠图完成！✅ 细节不满意可点「手动修边」");
     } catch (err) {
         showToast("抠图失败：" + (err.message || "未知错误"), true);
     } finally {
         hideLoading();
     }
+});
+
+// ============================================================
+//  抠图手动修边 —— 画笔擦除/橡皮还原
+// ============================================================
+let bgEditCanvas = null;
+let bgEditCtx = null;
+let bgEditOrigImg = null;  // 原图
+let bgEditTool = "bgBrush";
+let bgEditBrushSize = 15;
+
+$("#btnBgEdit").addEventListener("click", () => {
+    if (!bgResultUrl) return;
+    $("#bgEditor").style.display = "block";
+    $("#bgEditor").scrollIntoView({ behavior: "smooth" });
+    setupBgEditor();
+});
+
+function setupBgEditor() {
+    const resultImg = new Image();
+    resultImg.onload = () => {
+        const origImg = new Image();
+        origImg.onload = () => {
+            bgEditOrigImg = origImg;
+            initBgEditCanvas(resultImg);
+        };
+        origImg.src = bgOrigUrl;
+    };
+    resultImg.src = bgResultUrl;
+}
+
+function initBgEditCanvas(resultImg) {
+    const canvas = $("#bgEditCanvas");
+    const maxW = 780;
+    const scale = Math.min(1, maxW / resultImg.width);
+    canvas.width = resultImg.width * scale;
+    canvas.height = resultImg.height * scale;
+    canvas.style.width = canvas.width + "px";
+    canvas.style.height = canvas.height + "px";
+
+    bgEditCanvas = canvas;
+    bgEditCtx = canvas.getContext("2d");
+    bgEditCtx.drawImage(resultImg, 0, 0, canvas.width, canvas.height);
+
+    // 事件
+    let drawing = false;
+    canvas.onmousedown = (e) => { drawing = true; bgEditDraw(e); };
+    canvas.onmousemove = (e) => { if (drawing) bgEditDraw(e); };
+    canvas.onmouseup = () => { drawing = false; updateBgDownload(); };
+    canvas.onmouseleave = () => { drawing = false; updateBgDownload(); };
+    canvas.ontouchstart = (e) => { e.preventDefault(); drawing = true; bgEditDraw(e.touches[0]); };
+    canvas.ontouchmove = (e) => { e.preventDefault(); if (drawing) bgEditDraw(e.touches[0]); };
+    canvas.ontouchend = () => { drawing = false; updateBgDownload(); };
+}
+
+function bgEditDraw(e) {
+    const rect = bgEditCanvas.getBoundingClientRect();
+    const sx = bgEditCanvas.width / rect.width;
+    const sy = bgEditCanvas.height / rect.height;
+    const x = (e.clientX - rect.left) * sx;
+    const y = (e.clientY - rect.top) * sy;
+    const r = bgEditBrushSize / 2;
+
+    bgEditCtx.beginPath();
+    bgEditCtx.arc(x, y, r, 0, Math.PI * 2);
+
+    if (bgEditTool === "bgBrush") {
+        // 擦除 → 目标外模式：把像素清掉（透明）
+        bgEditCtx.save();
+        bgEditCtx.clip();
+        bgEditCtx.clearRect(x - r - 2, y - r - 2, r * 2 + 4, r * 2 + 4);
+        bgEditCtx.restore();
+    } else {
+        // 还原 → 从原图复制
+        bgEditCtx.save();
+        bgEditCtx.clip();
+        bgEditCtx.drawImage(bgEditOrigImg,
+            x / sx - r, y / sy - r, r * 2, r * 2,
+            x - r, y - r, r * 2, r * 2);
+        bgEditCtx.restore();
+    }
+}
+
+function updateBgDownload() {
+    bgEditCanvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        $("#bgDownload").href = url;
+        $("#bgOutput").src = url;
+    }, "image/png");
+}
+
+// 编辑工具栏
+$$("#bgEditor .wm-tool-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+        $$("#bgEditor .wm-tool-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        bgEditTool = btn.dataset.tool;
+    });
+});
+
+$("#bgBrushSize").addEventListener("input", (e) => {
+    bgEditBrushSize = parseInt(e.target.value);
+    $("#bgBrushSizeVal").textContent = bgEditBrushSize + "px";
 });
 
 // ============================================================
