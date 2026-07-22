@@ -9,7 +9,7 @@
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
 // 后端 API 地址（部署 Render 后更新这个地址）
-let BACKEND_URL = "";
+let BACKEND_URL = "https://virtual-tryon-o1c1.onrender.com";
 
 // Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
 function replicateFetch(path, options) {
