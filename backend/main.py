@@ -28,8 +28,8 @@ def get_remover():
     global _bg_remover
     if _bg_remover is None:
         from rembg import new_session
-        # isnet-general-use 比 u2net 轻量，适合 512MB 内存
-        _bg_remover = new_session("isnet-general-use")
+        # silueta 极小模型 ~6MB，适合 Render 免费版
+        _bg_remover = new_session("silueta")
     return _bg_remover
 
 @app.get("/")
