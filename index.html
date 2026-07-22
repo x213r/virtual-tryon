@@ -47,6 +47,11 @@
                 </div>
             </div>
             <button class="btn-generate" id="btnRemoveBg" disabled>✂️ 一键抠图</button>
+            <div class="hf-token-row" id="hfTokenRow">
+                <input type="password" id="hfTokenInput" class="api-key-input" placeholder="HuggingFace Token (hf_...) 免下载">
+                <button class="btn-save-key" id="btnSaveHfToken">保存</button>
+                <span class="api-key-msg" id="hfTokenMsg"></span>
+            </div>
             <div class="result-section" id="bgResult" style="display:none;">
                 <h3>抠图结果</h3>
                 <div class="result-card">

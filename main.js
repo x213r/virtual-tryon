@@ -9,7 +9,15 @@
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
 // 后端 API 地址（部署 Render 后更新这个地址）
-let BACKEND_URL = "";
+let BACKEND_URL = "https://api-inference.huggingface.co/models/not-lain/rembg";
+const HF_STORAGE_KEY = "hf_api_token";
+
+function getHfToken() {
+    return (localStorage.getItem(HF_STORAGE_KEY) || "").trim();
+}
+function hasHfToken() {
+    return getHfToken().length > 0;
+}
 
 // Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
 function replicateFetch(path, options) {
@@ -432,30 +440,28 @@ setupUpload({
     }
 });
 
-// 后端抠图（快，不用下载模型）
+// 后端抠图（HuggingFace 免费 API，不用下载模型）
 async function removeBgViaBackend(file) {
-    const formData = new FormData();
-    formData.append("image", file);
-
-    // 10 秒超时，超时自动走浏览器抠图
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), 30000); // 首次冷启动要等久一点
 
-    const resp = await fetch(BACKEND_URL + "/api/remove-bg", {
+    const resp = await fetch(BACKEND_URL, {
         method: "POST",
-        body: formData,
+        headers: { "Authorization": "Bearer " + getHfToken() },
+        body: file, // HF API 直接接收原始图片字节
         signal: controller.signal,
     });
     clearTimeout(timeout);
-    const data = await resp.json();
 
-    if (!data.ok) throw new Error(data.message || "后端抠图失败");
+    if (!resp.ok) {
+        const errText = await resp.text();
+        // HF 模型冷启动时会返回 loading 状态
+        if (errText.includes("loading")) throw new Error("模型加载中，请稍后重试");
+        throw new Error("HuggingFace: " + (errText || resp.status));
+    }
 
-    // base64 转 Blob
-    const byteString = atob(data.image_base64);
-    const bytes = new Uint8Array(byteString.length);
-    for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
-    return new Blob([bytes], { type: "image/png" });
+    // HF 直接返回处理后的图片 Blob
+    return await resp.blob();
 }
 
 // 统一的结果处理
@@ -484,13 +490,47 @@ async function handleBgResult(resultBlob) {
     showToast("抠图完成！✅ 细节不满意可点「手动修边」");
 }
 
+// HF Token 管理
+function updateHfTokenUI() {
+    const token = getHfToken();
+    const input = $("#hfTokenInput");
+    const msg = $("#hfTokenMsg");
+    if (token) {
+        input.value = token.slice(0,4) + "****" + token.slice(-4);
+        input.classList.add("saved");
+        input.type = "text";
+        msg.textContent = "✅ Token 已保存 — 免下载抠图";
+        msg.className = "api-key-msg success";
+    } else {
+        input.value = "";
+        input.type = "password";
+        input.classList.remove("saved");
+        msg.textContent = "";
+        msg.className = "api-key-msg";
+    }
+}
+
+$("#btnSaveHfToken").addEventListener("click", () => {
+    const input = $("#hfTokenInput");
+    const val = input.value.trim();
+    if (!val) { localStorage.removeItem(HF_STORAGE_KEY); updateHfTokenUI(); return; }
+    if (!val.startsWith("hf_")) { showToast("Token 格式应为 hf_ 开头", true); return; }
+    localStorage.setItem(HF_STORAGE_KEY, val);
+    updateHfTokenUI();
+    showToast("Token 已保存！下次抠图优先走 HuggingFace ⚡");
+});
+
+$("#hfTokenInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#btnSaveHfToken").click();
+});
+
 // 抠图按钮点击
 $("#btnRemoveBg").addEventListener("click", async () => {
     if (!bgFile) return;
 
-    // 尝试走后端（快，不用下载）
-    if (BACKEND_URL) {
-        showLoading("服务器抠图中...", "无需下载模型，约 5-15 秒 ⚡");
+    // 有 HF Token 就走 API（快，不用下载）
+    if (hasHfToken()) {
+        showLoading("HuggingFace 抠图中...", "免费 API，约 5-10 秒 ⚡");
         try {
             const blob = await removeBgViaBackend(bgFile);
             await handleBgResult(blob);
@@ -1072,8 +1112,9 @@ function init() {
         text.textContent = "本地抠图 ✅";
     }
 
-    // 恢复已保存的 API Key
+    // 恢复已保存的 API Key + HF Token
     updateTryOnUI();
+    updateHfTokenUI();
 }
 
 init();
