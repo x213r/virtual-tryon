@@ -491,7 +491,8 @@ $("#btnRemoveBg").addEventListener("click", async () => {
             return;
         } catch (e) {
             hideLoading();
-            console.warn("Worker 失败，切回浏览器本地:", e.message);
+            showToast("Worker 报错: " + e.message, true);
+            console.error("Worker 失败详情:", e);
         }
     }
 
