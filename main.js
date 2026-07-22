@@ -500,6 +500,8 @@ function initBgEditCanvas(resultImg) {
     canvas.ontouchstart = (e) => { e.preventDefault(); drawing = true; bgEditDraw(e.touches[0]); };
     canvas.ontouchmove = (e) => { e.preventDefault(); if (drawing) bgEditDraw(e.touches[0]); };
     canvas.ontouchend = () => { drawing = false; updateBgDownload(); };
+
+    updateBgCursor();
 }
 
 function bgEditDraw(e) {
@@ -509,25 +511,54 @@ function bgEditDraw(e) {
     const x = (e.clientX - rect.left) * sx;
     const y = (e.clientY - rect.top) * sy;
     const r = bgEditBrushSize / 2;
+    const origScale = bgEditCanvas.width / bgEditOrigImg.width;
 
     bgEditCtx.beginPath();
     bgEditCtx.arc(x, y, r, 0, Math.PI * 2);
 
     if (bgEditTool === "bgBrush") {
-        // 擦除 → 目标外模式：把像素清掉（透明）
         bgEditCtx.save();
         bgEditCtx.clip();
         bgEditCtx.clearRect(x - r - 2, y - r - 2, r * 2 + 4, r * 2 + 4);
         bgEditCtx.restore();
     } else {
-        // 还原 → 从原图复制
+        // 还原：从原图对应位置拿像素
         bgEditCtx.save();
         bgEditCtx.clip();
-        bgEditCtx.drawImage(bgEditOrigImg,
-            x / sx - r, y / sy - r, r * 2, r * 2,
-            x - r, y - r, r * 2, r * 2);
+        const srcX = (x - r) / origScale;
+        const srcY = (y - r) / origScale;
+        const srcW = (r * 2) / origScale;
+        const srcH = (r * 2) / origScale;
+        bgEditCtx.drawImage(bgEditOrigImg, srcX, srcY, srcW, srcH, x - r, y - r, r * 2, r * 2);
         bgEditCtx.restore();
     }
+}
+
+// 红色圆圈光标
+function updateBgCursor() {
+    const size = bgEditBrushSize + 4;
+    const cur = document.createElement("canvas");
+    cur.width = size; cur.height = size;
+    const ctx = cur.getContext("2d");
+    const cx = size / 2, cy = size / 2, r = bgEditBrushSize / 2;
+    const color = bgEditTool === "bgBrush" ? "#ef4444" : "#22c55e";
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
+    ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.stroke();
+
+    bgEditCanvas.style.cursor = `url(${cur.toDataURL()}) ${cx} ${cy}, crosshair`;
 }
 
 function updateBgDownload() {
@@ -544,12 +575,14 @@ $$("#bgEditor .wm-tool-btn").forEach(btn => {
         $$("#bgEditor .wm-tool-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         bgEditTool = btn.dataset.tool;
+        if (bgEditCanvas) updateBgCursor();
     });
 });
 
 $("#bgBrushSize").addEventListener("input", (e) => {
     bgEditBrushSize = parseInt(e.target.value);
     $("#bgBrushSizeVal").textContent = bgEditBrushSize + "px";
+    if (bgEditCanvas) updateBgCursor();
 });
 
 // ============================================================
