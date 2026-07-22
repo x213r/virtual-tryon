@@ -739,24 +739,35 @@ function autoDetectWatermarks() {
     return Math.round(markedCount / 100); // 近似水印数量
 }
 
-// 边缘像素补全——简单直接，只采周围已知像素，不模糊
+// 边缘像素补全——在显示尺寸填充，输出时还原原始尺寸
 function inpaintWatermarkTelea() {
-    const w = wmDisplayCanvas.width, h = wmDisplayCanvas.height;
-    wmDisplayCtx.drawImage(wmImage, 0, 0, w, h);
-    const srcData = wmDisplayCtx.getImageData(0, 0, w, h);
+    const dw = wmDisplayCanvas.width, dh = wmDisplayCanvas.height;
+    const ow = wmImage.width, oh = wmImage.height; // 原始尺寸
+    const scale = ow / dw; // 缩放比例
+
+    wmDisplayCtx.drawImage(wmImage, 0, 0, dw, dh);
+    const srcData = wmDisplayCtx.getImageData(0, 0, dw, dh);
     const src = srcData.data;
-    const maskData = wmMaskCtx.getImageData(0, 0, w, h);
+    const maskData = wmMaskCtx.getImageData(0, 0, dw, dh);
     const mask = maskData.data;
 
     // 所有待填充像素
     const maskedSet = new Set();
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-            if (mask[(y * w + x) * 4] > 128) maskedSet.add(y * w + x);
+    const originalMasked = new Set(); // 备份，输出时用
+    for (let y = 0; y < dh; y++) {
+        for (let x = 0; x < dw; x++) {
+            if (mask[(y * dw + x) * 4] > 128) {
+                maskedSet.add(y * dw + x);
+                originalMasked.add(y * dw + x);
+            }
         }
     }
     if (maskedSet.size === 0) {
-        return new Promise(resolve => wmDisplayCanvas.toBlob(blob => resolve(blob), "image/png"));
+        // 还是输出原始尺寸
+        const outCanvas = document.createElement("canvas");
+        outCanvas.width = ow; outCanvas.height = oh;
+        outCanvas.getContext("2d").drawImage(wmImage, 0, 0, ow, oh);
+        return new Promise(resolve => outCanvas.toBlob(blob => resolve(blob), "image/png"));
     }
 
     // 逐轮从边缘向内填充
@@ -764,23 +775,22 @@ function inpaintWatermarkTelea() {
     for (let pass = 0; pass < maxPasses && maskedSet.size > 0; pass++) {
         const edgePixels = [];
         for (const i of maskedSet) {
-            const x = i % w, y = Math.floor(i / w);
+            const x = i % dw, y = Math.floor(i / dw);
             let hasKnown = false;
             for (let dy = -1; dy <= 1 && !hasKnown; dy++) {
                 for (let dx = -1; dx <= 1 && !hasKnown; dx++) {
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx, ny = y + dy;
-                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                    if (!maskedSet.has(ny * w + nx)) hasKnown = true;
+                    if (nx < 0 || ny < 0 || nx >= dw || ny >= dh) continue;
+                    if (!maskedSet.has(ny * dw + nx)) hasKnown = true;
                 }
             }
             if (hasKnown) edgePixels.push(i);
         }
-
         if (edgePixels.length === 0) break;
 
         for (const idx of edgePixels) {
-            const x = idx % w, y = Math.floor(idx / w);
+            const x = idx % dw, y = Math.floor(idx / dw);
             let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
             const si = idx * 4;
 
@@ -788,9 +798,9 @@ function inpaintWatermarkTelea() {
                 for (let dy = -r; dy <= r; dy++) {
                     for (let dx = -r; dx <= r; dx++) {
                         const nx = x + dx, ny = y + dy;
-                        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                        const ni = ny * w + nx;
-                        if (maskedSet.has(ni)) continue; // 跳过未填充的
+                        if (nx < 0 || ny < 0 || nx >= dw || ny >= dh) continue;
+                        const ni = ny * dw + nx;
+                        if (maskedSet.has(ni)) continue;
                         const dist = Math.sqrt(dx * dx + dy * dy);
                         const weight = 1 / (1 + dist);
                         rSum += src[ni * 4] * weight;
@@ -811,11 +821,45 @@ function inpaintWatermarkTelea() {
         }
     }
 
-    const outData = new ImageData(src, w, h);
+    // 输出原始尺寸：以原图打底，修复区域覆盖上去
     const outCanvas = document.createElement("canvas");
-    outCanvas.width = w;
-    outCanvas.height = h;
-    outCanvas.getContext("2d").putImageData(outData, 0, 0);
+    outCanvas.width = ow;
+    outCanvas.height = oh;
+    const outCtx = outCanvas.getContext("2d");
+    outCtx.drawImage(wmImage, 0, 0, ow, oh);
+    const origData = outCtx.getImageData(0, 0, ow, oh);
+
+    // 把修复后的显示层像素映射回原始尺寸
+    for (let dy = 0; dy < dh; dy++) {
+        for (let dx = 0; dx < dw; dx++) {
+            const di = dy * dw + dx;
+            // 跳过还在maskedSet里的（没被填充的），跳过从来没被遮罩标记的
+            if (maskedSet.has(di)) continue;
+
+            const si = di * 4;
+            // 原来在遮罩里 且 现在不在maskedSet里 = 被修复过了
+            if (originalMasked.has(di) && !maskedSet.has(di)) {
+                const ox1 = Math.floor(dx * scale);
+                const oy1 = Math.floor(dy * scale);
+                const ox2 = Math.floor((dx + 1) * scale);
+                const oy2 = Math.floor((dy + 1) * scale);
+
+                for (let oy = oy1; oy < oy2; oy++) {
+                    for (let ox = ox1; ox < ox2; ox++) {
+                        if (ox >= 0 && ox < ow && oy >= 0 && oy < oh) {
+                            const oi = (oy * ow + ox) * 4;
+                            origData.data[oi] = src[si];
+                            origData.data[oi + 1] = src[si + 1];
+                            origData.data[oi + 2] = src[si + 2];
+                            origData.data[oi + 3] = 255;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    outCtx.putImageData(origData, 0, 0);
     return new Promise(resolve => outCanvas.toBlob(blob => resolve(blob), "image/png"));
 }
 
