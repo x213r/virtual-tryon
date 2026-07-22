@@ -476,7 +476,7 @@ body {
     background: var(--primary-light);
     color: var(--primary);
 }
-.btn-auto-detect, .btn-edit-mode {
+.btn-auto-detect {
     padding: 8px 20px;
     background: #f0f9ff;
     color: #0284c7;
@@ -488,7 +488,22 @@ body {
     transition: all .15s;
     margin: 0 6px;
 }
-.btn-auto-detect:hover, .btn-edit-mode:hover { background: #e0f2fe; }
+.btn-auto-detect:hover { background: #e0f2fe; }
+
+.btn-edit-mode {
+    display: block;
+    margin: 16px auto 0;
+    padding: 8px 20px;
+    background: #f0f9ff;
+    color: #0284c7;
+    border: 2px solid #0284c7;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .15s;
+}
+.btn-edit-mode:hover { background: #e0f2fe; }
 
 .wm-brush-size {
     font-size: 14px;
