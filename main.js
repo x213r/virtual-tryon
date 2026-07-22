@@ -437,10 +437,16 @@ async function removeBgViaBackend(file) {
     const formData = new FormData();
     formData.append("image", file);
 
+    // 10 秒超时，超时自动走浏览器抠图
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     const resp = await fetch(BACKEND_URL + "/api/remove-bg", {
         method: "POST",
         body: formData,
+        signal: controller.signal,
     });
+    clearTimeout(timeout);
     const data = await resp.json();
 
     if (!data.ok) throw new Error(data.message || "后端抠图失败");
