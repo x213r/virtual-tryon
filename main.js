@@ -404,17 +404,16 @@ $("#btnRemoveBg").addEventListener("click", async () => {
 
     try {
         const resultBlob = await removeBackground(bgFile, {
-            model: "isnet-general-use",
+            model: "medium",
             output: {
                 type: "image/png",
                 quality: 1.0,
             },
             progress: (key, current, total) => {
-                // key 可能是 "download:model" 或 "compute:inference"
                 const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-                if (key && key.includes("download")) {
-                    updateLoading("正在下载 AI 模型...", `下载进度：${pct}%（下次使用无需下载）`);
-                } else if (key && key.includes("compute")) {
+                if (key && key.startsWith("fetch:")) {
+                    updateLoading("正在下载 AI 模型...", `下载进度：${pct}%（下次无需下载）`);
+                } else if (key && key.startsWith("compute:")) {
                     updateLoading("AI 正在抠图中...", `处理进度：${pct}%`);
                 } else {
                     updateLoading("AI 处理中，请稍候...", `${pct}%`);
