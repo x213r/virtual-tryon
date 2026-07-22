@@ -385,6 +385,15 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function loadImageFromBlob(blob) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(blob);
+    });
+}
+
 // ============================================================
 //  一键抠图 — 上传逻辑
 // ============================================================
@@ -445,9 +454,22 @@ $("#btnRemoveBg").addEventListener("click", async () => {
             },
         });
 
-        // 存储结果供手动修边使用
-        bgResultBlob = resultBlob;
-        bgResultUrl = URL.createObjectURL(resultBlob);
+        // 检查尺寸，如果AI缩小了就放大回原图尺寸
+        const resultImg = await loadImageFromBlob(resultBlob);
+        const origImg = await loadImageFromBlob(bgFile);
+
+        if (resultImg.width !== origImg.width || resultImg.height !== origImg.height) {
+            const canvas = document.createElement("canvas");
+            canvas.width = origImg.width;
+            canvas.height = origImg.height;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(resultImg, 0, 0, canvas.width, canvas.height);
+            bgResultBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        } else {
+            bgResultBlob = resultBlob;
+        }
+
+        bgResultUrl = URL.createObjectURL(bgResultBlob);
         bgOrigUrl = URL.createObjectURL(bgFile);
 
         // 显示结果
