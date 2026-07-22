@@ -1,0 +1,9 @@
+# Cloudflare Worker — virtual-tryon
+# HuggingFace rembg API 代理
+name = "virtual-tryon"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# 部署后你会得到一个 URL，类似：
+# https://virtual-tryon.<你的子域名>.workers.dev
+# 把这个 URL 填入 main.js 的 WORKER_URL

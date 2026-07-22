@@ -8,10 +8,13 @@
 // 抠图引擎（ES Module 导入，首次自动下载 AI 模型 ~40MB）
 import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
-// HuggingFace API 抠图（需要自己的 Token）
-// 去 https://huggingface.co/settings/tokens 创建免费 Token
-const HF_API = "https://api-inference.huggingface.co/models/not-lain/rembg";
-const HF_TOKEN = "";  // ← 在这填你的 HF Token，留空则自动用浏览器本地抠图
+// Cloudflare Worker 代理 HuggingFace API
+// 🔒 Token 存在 Worker 的环境变量里，前端永远看不到
+// 部署 Worker 后，把下面这个 URL 换成你的 Worker 地址
+const WORKER_URL = "https://virtual-tryon.workers.dev";  // ← 改成你的实际 Worker URL
+
+// 是否启用 Worker 加速抠图（服务端处理，速度更快）
+const USE_WORKER = true;
 
 // Replicate API 代理（解决浏览器 CORS 跨域拦截，零配置）
 function replicateFetch(path, options) {
@@ -460,18 +463,17 @@ async function handleBgResult(resultBlob) {
     showToast("抠图完成！✅ 细节不满意可点「手动修边」");
 }
 
-// HF API 抠图
-async function removeBgViaHF(file) {
+// Worker 代理抠图（Token 在服务端，前端不暴露）
+async function removeBgViaWorker(file) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 30000);
-    const resp = await fetch(HF_API, {
+    const resp = await fetch(WORKER_URL, {
         method: "POST",
-        headers: { "Authorization": "Bearer " + HF_TOKEN },
         body: file,
         signal: ctrl.signal,
     });
     clearTimeout(t);
-    if (!resp.ok) throw new Error("HF API: " + (await resp.text().catch(() => resp.status)));
+    if (!resp.ok) throw new Error("Worker: " + (await resp.text().catch(() => resp.status)));
     return await resp.blob();
 }
 
@@ -479,17 +481,17 @@ async function removeBgViaHF(file) {
 $("#btnRemoveBg").addEventListener("click", async () => {
     if (!bgFile) return;
 
-    // 如果配置了 HF Token，优先走 HuggingFace API（速度快，免下载模型）
-    if (HF_TOKEN) {
-        showLoading("HF API 抠图中...", "免费，约 5-10 秒 ⚡");
+    // 如果配置了 Worker，优先走 Cloudflare Worker（速度快，免下载模型）
+    if (USE_WORKER) {
+        showLoading("Worker 抠图中...", "Cloudflare 全球加速，约 3-8 秒 ⚡");
         try {
-            const blob = await removeBgViaHF(bgFile);
+            const blob = await removeBgViaWorker(bgFile);
             await handleBgResult(blob);
             hideLoading();
             return;
         } catch (e) {
             hideLoading();
-            console.warn("HF API 失败，切回浏览器本地:", e.message);
+            console.warn("Worker 失败，切回浏览器本地:", e.message);
         }
     }
 
@@ -1051,9 +1053,9 @@ function init() {
     const dot = $("#statusDot");
     const text = $("#statusText");
 
-    if (HF_TOKEN) {
+    if (USE_WORKER) {
         dot.className = "status-dot online";
-        text.textContent = "HF API 就绪 ⚡";
+        text.textContent = "Worker 加速就绪 ⚡";
     } else {
         dot.className = "status-dot online";
         text.textContent = "浏览器抠图模式 ✅";
