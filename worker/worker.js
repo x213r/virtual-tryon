@@ -25,11 +25,13 @@ export default {
 
     // 只接受 POST
     if (request.method !== "POST") {
-      return new Response("Send a POST with image binary", { status: 405 });
+      return new Response("Worker OK — send a POST with image binary", {
+        status: 405,
+        headers: { "Access-Control-Allow-Origin": "*" },
+      });
     }
 
-    // 🔒 Token 设为 Cloudflare Secret（wrangler secret put HF_TOKEN）
-    //    或直接在下方替换（服务端代码，不会暴露给前端）
+    // 🔒 Token 存服务端，浏览器不可见
     const HF_TOKEN = env.HF_TOKEN || "hf_你的Token填这里";
 
     const hfUrl = "https://api-inference.huggingface.co/models/not-lain/rembg";
