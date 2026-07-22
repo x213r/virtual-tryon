@@ -18,7 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 懒加载 rembg（首次请求时加载模型 ~170MB）
+# 懒加载 rembg（用轻量模型，适配 512MB 内存）
 _bg_remover = None
 
 
@@ -26,7 +26,7 @@ def get_remover():
     global _bg_remover
     if _bg_remover is None:
         from rembg import new_session
-        _bg_remover = new_session("u2net")
+        _bg_remover = new_session("isnet-general-use")  # 比 u2net 轻量
     return _bg_remover
 
 
@@ -43,10 +43,14 @@ async def remove_bg(image: UploadFile = File(...)):
 
     try:
         from rembg import remove
+        import traceback
 
         input_bytes = await image.read()
 
-        # rembg 抠图
+        # 限制最大 10MB
+        if len(input_bytes) > 10 * 1024 * 1024:
+            return JSONResponse({"ok": False, "message": "图片不能超过 10MB"}, status_code=400)
+
         output_bytes = remove(input_bytes, session=get_remover())
 
         b64 = base64.b64encode(output_bytes).decode()
@@ -58,4 +62,9 @@ async def remove_bg(image: UploadFile = File(...)):
         }
 
     except Exception as e:
-        return JSONResponse({"ok": False, "message": f"抠图失败：{str(e)}"}, status_code=500)
+        traceback.print_exc()
+        return JSONResponse({
+            "ok": False,
+            "message": f"抠图失败：{str(e)}",
+            "detail": traceback.format_exc()
+        }, status_code=500)
