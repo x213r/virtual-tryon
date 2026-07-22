@@ -739,7 +739,7 @@ function autoDetectWatermarks() {
     return Math.round(markedCount / 100); // 近似水印数量
 }
 
-// 简单直接的全像素修复（边缘向内多轮填充 + 大数据量搜索）
+// 边缘像素补全——简单直接，只采周围已知像素，不模糊
 function inpaintWatermarkTelea() {
     const w = wmDisplayCanvas.width, h = wmDisplayCanvas.height;
     wmDisplayCtx.drawImage(wmImage, 0, 0, w, h);
@@ -748,28 +748,21 @@ function inpaintWatermarkTelea() {
     const maskData = wmMaskCtx.getImageData(0, 0, w, h);
     const mask = maskData.data;
 
-    // 收集所有待填充像素
+    // 所有待填充像素
     const maskedSet = new Set();
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-            const i = y * w + x;
-            if (mask[i * 4] > 128) maskedSet.add(i);
+            if (mask[(y * w + x) * 4] > 128) maskedSet.add(y * w + x);
         }
     }
-
     if (maskedSet.size === 0) {
         return new Promise(resolve => wmDisplayCanvas.toBlob(blob => resolve(blob), "image/png"));
     }
 
-    // 多轮填充：每轮只处理边缘像素，逐轮向内推进
-    let filledAny = true;
-    const maxPasses = 500; // 支持大区域
-    const radius = 10;
-
-    for (let pass = 0; pass < maxPasses && maskedSet.size > 0 && filledAny; pass++) {
-        filledAny = false;
+    // 逐轮从边缘向内填充
+    const maxPasses = 500;
+    for (let pass = 0; pass < maxPasses && maskedSet.size > 0; pass++) {
         const edgePixels = [];
-
         for (const i of maskedSet) {
             const x = i % w, y = Math.floor(i / w);
             let hasKnown = false;
@@ -778,33 +771,33 @@ function inpaintWatermarkTelea() {
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                    const ni = ny * w + nx;
-                    if (!maskedSet.has(ni)) hasKnown = true;
+                    if (!maskedSet.has(ny * w + nx)) hasKnown = true;
                 }
             }
             if (hasKnown) edgePixels.push(i);
         }
 
-        // 填充边缘像素
+        if (edgePixels.length === 0) break;
+
         for (const idx of edgePixels) {
             const x = idx % w, y = Math.floor(idx / w);
             let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
             const si = idx * 4;
 
-            for (let dy = -radius; dy <= radius; dy++) {
-                for (let dx = -radius; dx <= radius; dx++) {
-                    const nx = x + dx, ny = y + dy;
-                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                    const ni = ny * w + nx;
-                    if (maskedSet.has(ni)) continue; // 跳过未填充的
-
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < 0.5) continue;
-                    const weight = 1 / (dist * dist);
-                    rSum += src[ni * 4] * weight;
-                    gSum += src[ni * 4 + 1] * weight;
-                    bSum += src[ni * 4 + 2] * weight;
-                    wSum += weight;
+            for (let r = 2; r <= 15 && wSum === 0; r++) {
+                for (let dy = -r; dy <= r; dy++) {
+                    for (let dx = -r; dx <= r; dx++) {
+                        const nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                        const ni = ny * w + nx;
+                        if (maskedSet.has(ni)) continue; // 跳过未填充的
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const weight = 1 / (1 + dist);
+                        rSum += src[ni * 4] * weight;
+                        gSum += src[ni * 4 + 1] * weight;
+                        bSum += src[ni * 4 + 2] * weight;
+                        wSum += weight;
+                    }
                 }
             }
 
@@ -812,9 +805,8 @@ function inpaintWatermarkTelea() {
                 src[si] = Math.round(rSum / wSum);
                 src[si + 1] = Math.round(gSum / wSum);
                 src[si + 2] = Math.round(bSum / wSum);
-                src[si + 3] = 255; // 强制不透明
+                src[si + 3] = 255;
                 maskedSet.delete(idx);
-                filledAny = true;
             }
         }
     }
@@ -824,7 +816,6 @@ function inpaintWatermarkTelea() {
     outCanvas.width = w;
     outCanvas.height = h;
     outCanvas.getContext("2d").putImageData(outData, 0, 0);
-
     return new Promise(resolve => outCanvas.toBlob(blob => resolve(blob), "image/png"));
 }
 
