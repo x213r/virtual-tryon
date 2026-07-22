@@ -612,11 +612,35 @@ $("#wmBrushSize").addEventListener("input", (e) => {
 // 去除水印按钮
 $("#btnRemoveWatermark").addEventListener("click", async () => {
     if (!wmImage) return;
-    showLoading("正在去除水印...", "像素补全算法处理中");
-    await sleep(100); // 让 loading 显示出来
+    await doInpaint("正在去除水印...");
+});
+
+// 自动识别按钮
+$("#btnAutoDetect").addEventListener("click", async () => {
+    if (!wmImage) return;
+    showLoading("正在自动识别水印...", "扫描相似区域中");
 
     try {
-        const resultBlob = await inpaintWatermark();
+        const count = autoDetectWatermarks();
+        if (count > 0) {
+            hideLoading();
+            showToast(`已自动标记 ${count} 处疑似水印，请确认后点"去除水印"`);
+        } else {
+            hideLoading();
+            showToast("未检测到相似水印，请手动涂抹后重试", true);
+        }
+    } catch (err) {
+        hideLoading();
+        showToast("识别失败：" + (err.message || "未知错误"), true);
+    }
+});
+
+async function doInpaint(msg) {
+    showLoading(msg, "Telea 像素修复算法处理中");
+    await sleep(100);
+
+    try {
+        const resultBlob = await inpaintWatermarkTelea();
         const resultUrl = URL.createObjectURL(resultBlob);
 
         $("#wmOriginal").src = URL.createObjectURL(wmFile);
@@ -630,117 +654,208 @@ $("#btnRemoveWatermark").addEventListener("click", async () => {
     } finally {
         hideLoading();
     }
-});
+}
 
-// 像素补全算法：用周围像素填充遮罩区域
-function inpaintWatermark() {
-    const w = wmDisplayCanvas.width;
-    const h = wmDisplayCanvas.height;
-
-    // 获取原图像素
-    wmDisplayCtx.drawImage(wmImage, 0, 0, w, h); // 重绘原图
+// 自动识别：找出与已涂抹区域相似的像素
+function autoDetectWatermarks() {
+    const w = wmDisplayCanvas.width, h = wmDisplayCanvas.height;
+    const maskData = wmMaskCtx.getImageData(0, 0, w, h);
+    const mask = maskData.data;
     const srcData = wmDisplayCtx.getImageData(0, 0, w, h);
     const src = srcData.data;
 
-    // 获取遮罩
-    const maskData = wmMaskCtx.getImageData(0, 0, w, h);
-    const mask = maskData.data;
-
-    // 找出遮罩像素
-    const maskedPixels = [];
+    // 从已涂抹区域采样颜色
+    let sampleR = 0, sampleG = 0, sampleB = 0, sampleCount = 0;
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             const i = (y * w + x) * 4;
-            if (mask[i] > 128) { // 白色=要填充
-                maskedPixels.push({ x, y });
+            if (mask[i] > 128) {
+                sampleR += src[i]; sampleG += src[i + 1]; sampleB += src[i + 2];
+                sampleCount++;
             }
         }
     }
+    if (sampleCount === 0) return 0;
 
-    if (maskedPixels.length === 0) {
-        return new Promise(resolve => {
-            wmDisplayCanvas.toBlob(blob => resolve(blob), "image/png");
-        });
+    sampleR = Math.round(sampleR / sampleCount);
+    sampleG = Math.round(sampleG / sampleCount);
+    sampleB = Math.round(sampleB / sampleCount);
+
+    // 扫描全图，找相似颜色的像素
+    const threshold = 45; // 颜色容差
+    const minCluster = 30; // 最小聚类大小
+    const similar = new Uint8Array(w * h);
+
+    for (let i = 0; i < w * h; i++) {
+        const si = i * 4;
+        const dr = Math.abs(src[si] - sampleR);
+        const dg = Math.abs(src[si + 1] - sampleG);
+        const db = Math.abs(src[si + 2] - sampleB);
+        if (dr < threshold && dg < threshold && db < threshold) {
+            similar[i] = 1;
+        }
     }
 
-    // 多层补全（从边缘向内部填充）
-    const maxRadius = 30;
-    const passes = 3;
-    const result = new Uint8ClampedArray(src);
-
-    for (let pass = 0; pass < passes; pass++) {
-        const tempResult = new Uint8ClampedArray(result);
-
-        for (const { x, y } of maskedPixels) {
-            let r = 0, g = 0, b = 0, count = 0;
-
-            // 从周围采样非遮罩像素
-            for (let radius = 2; radius <= maxRadius && count === 0; radius++) {
-                for (let dy = -radius; dy <= radius; dy++) {
-                    for (let dx = -radius; dx <= radius; dx++) {
-                        const nx = x + dx;
-                        const ny = y + dy;
-                        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-
-                        const ni = (ny * w + nx) * 4;
-                        if (mask[ni] < 128) { // 非遮罩像素
-                            const dist = Math.sqrt(dx * dx + dy * dy);
-                            const weight = 1 / (1 + dist);
-                            r += tempResult[ni] * weight;
-                            g += tempResult[ni + 1] * weight;
-                            b += tempResult[ni + 2] * weight;
-                            count += weight;
-                        }
-                    }
-                }
-                if (count > 0) break; // 找到足够近的像素就停止扩大搜索
-            }
-
-            if (count > 0) {
-                const i = (y * w + x) * 4;
-                result[i] = r / count;
-                result[i + 1] = g / count;
-                result[i + 2] = b / count;
-                // result[i+3] 保持 alpha 不变
-            }
-        }
-
-        // 把已填充的像素从遮罩中移除（让内层像素也能采样到新填充的值）
-        if (pass < passes - 1) {
-            for (const { x, y } of maskedPixels) {
-                const i = (y * w + x) * 4;
-                if (mask[i] > 128) {
-                    // 检查是否已有邻居被填充
-                    let hasFilled = false;
-                    for (let dy = -1; dy <= 1 && !hasFilled; dy++) {
-                        for (let dx = -1; dx <= 1 && !hasFilled; dx++) {
-                            const ni = ((y + dy) * w + (x + dx)) * 4;
-                            if (mask[ni] < 128) hasFilled = true;
-                        }
-                    }
-                    if (hasFilled) {
-                        mask[i] = 100; // 标记为已填充，下一轮作为可用采样源
+    // 膨胀操作：扩展相似区域
+    const dilated = new Uint8Array(similar);
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            if (similar[y * w + x] === 1) {
+                for (let dy = -2; dy <= 2; dy++) {
+                    for (let dx = -2; dx <= 2; dx++) {
+                        dilated[(y + dy) * w + (x + dx)] = 1;
                     }
                 }
             }
-            // 将标记的像素转为可用源
-            for (const { x, y } of maskedPixels) {
-                const i = (y * w + x) * 4;
-                if (mask[i] === 100) mask[i] = 0;
+        }
+    }
+
+    // 自动标记到遮罩
+    let markedCount = 0;
+    for (let i = 0; i < w * h; i++) {
+        if (dilated[i] === 1) {
+            const mi = i * 4;
+            mask[mi] = 255;     // 白色=标记
+            mask[mi + 3] = 255;
+            markedCount++;
+        }
+    }
+    wmMaskCtx.putImageData(maskData, 0, 0);
+
+    // 更新显示
+    wmDisplayCtx.drawImage(wmImage, 0, 0, w, h);
+    for (let i = 0; i < w * h; i++) {
+        if (mask[i * 4] > 128) {
+            const x = i % w, y = Math.floor(i / w);
+            const si = i * 4;
+            const alpha = 0.35;
+            src[si] = src[si] * (1 - alpha) + 255 * alpha;
+            src[si + 1] = src[si + 1] * (1 - alpha);
+            src[si + 2] = src[si + 2] * (1 - alpha);
+        }
+    }
+    wmDisplayCtx.putImageData(srcData, 0, 0);
+
+    return Math.round(markedCount / 100); // 近似水印数量
+}
+
+// Telea 像素修复算法（改进版）
+function inpaintWatermarkTelea() {
+    const w = wmDisplayCanvas.width, h = wmDisplayCanvas.height;
+    wmDisplayCtx.drawImage(wmImage, 0, 0, w, h);
+    const srcData = wmDisplayCtx.getImageData(0, 0, w, h);
+    const src = srcData.data;
+    const maskData = wmMaskCtx.getImageData(0, 0, w, h);
+    const mask = maskData.data;
+
+    // 初始化：-1=未知需填充, 0=已知源像素, >0=待填充距离
+    const flag = new Int32Array(w * h);
+    const dist = new Float32Array(w * h);
+    const known = []; // BFS 队列
+
+    for (let i = 0; i < w * h; i++) {
+        if (mask[i * 4] < 128) {
+            flag[i] = 0; // 已知
+        } else {
+            flag[i] = -1; // 待填充
+        }
+    }
+
+    // 找到所有边界像素（待填充但邻居有已知像素）
+    const boundary = [];
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const i = y * w + x;
+            if (flag[i] === -1) {
+                let hasKnown = false;
+                for (let dy = -1; dy <= 1 && !hasKnown; dy++) {
+                    for (let dx = -1; dx <= 1 && !hasKnown; dx++) {
+                        if (flag[(y + dy) * w + (x + dx)] === 0) hasKnown = true;
+                    }
+                }
+                if (hasKnown) {
+                    flag[i] = 1;
+                    dist[i] = 0;
+                    boundary.push(i);
+                }
             }
         }
     }
 
-    // 最终输出
-    const outData = new ImageData(result, w, h);
+    if (boundary.length === 0) {
+        return new Promise(resolve => wmDisplayCanvas.toBlob(blob => resolve(blob), "image/png"));
+    }
+
+    // BFS 从边界向内传播
+    let queue = [...boundary];
+    let head = 0;
+    while (head < queue.length) {
+        const i = queue[head++];
+        const x = i % w, y = Math.floor(i / w);
+        const curDist = dist[i];
+
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                if (dx === 0 && dy === 0) continue;
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                const ni = ny * w + nx;
+
+                if (flag[ni] === -1) {
+                    flag[ni] = curDist + 1;
+                    dist[ni] = curDist + 1;
+                    queue.push(ni);
+                }
+            }
+        }
+    }
+
+    // 按距离排序，从小到大填充（边缘优先）
+    const fillOrder = [];
+    for (let i = 0; i < w * h; i++) {
+        if (flag[i] > 0) fillOrder.push(i);
+    }
+    fillOrder.sort((a, b) => flag[a] - flag[b]);
+
+    // 填充每个像素
+    const radius = 15;
+    for (const idx of fillOrder) {
+        const x = idx % w, y = Math.floor(idx / w);
+        let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
+
+        for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                const ni = ny * w + nx;
+                if (flag[ni] === 0) { // 已知像素
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist === 0) continue;
+                    const weight = 1 / (dist * dist);
+                    rSum += src[ni * 4] * weight;
+                    gSum += src[ni * 4 + 1] * weight;
+                    bSum += src[ni * 4 + 2] * weight;
+                    wSum += weight;
+                }
+            }
+        }
+
+        if (wSum > 0) {
+            const si = idx * 4;
+            src[si] = Math.round(rSum / wSum);
+            src[si + 1] = Math.round(gSum / wSum);
+            src[si + 2] = Math.round(bSum / wSum);
+            flag[idx] = 0; // 标记为已知，供后续像素采样
+        }
+    }
+
+    const outData = new ImageData(src, w, h);
     const outCanvas = document.createElement("canvas");
     outCanvas.width = w;
     outCanvas.height = h;
     outCanvas.getContext("2d").putImageData(outData, 0, 0);
 
-    return new Promise(resolve => {
-        outCanvas.toBlob(blob => resolve(blob), "image/png");
-    });
+    return new Promise(resolve => outCanvas.toBlob(blob => resolve(blob), "image/png"));
 }
 
 // ============================================================
