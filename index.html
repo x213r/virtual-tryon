@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚拟试穿 - AI 一键试穿 & 抠图</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ======== 顶部导航 ======== -->
+    <header class="header">
+        <div class="logo">
+            <span class="logo-icon">👗</span>
+            <span class="logo-text">虚拟试穿</span>
+        </div>
+        <nav class="nav">
+            <a href="#" class="nav-link active" data-tab="tryon">虚拟试穿</a>
+            <a href="#" class="nav-link" data-tab="removebg">一键抠图</a>
+        </nav>
+        <div class="header-status" id="headerStatus">
+            <span class="status-dot" id="statusDot"></span>
+            <span class="status-text" id="statusText">检查中...</span>
+        </div>
+    </header>
+
+    <!-- ======== 主内容区 ======== -->
+    <main class="main">
+
+        <!-- ===== Tab 1: 虚拟试穿 ===== -->
+        <section class="tab-panel active" id="panel-tryon">
+            <div class="hero">
+                <h1>把你的照片穿上任何衣服</h1>
+                <p>上传一张你的人像照片，再上传你想试的衣服图片，AI 帮你合成试穿效果</p>
+            </div>
+
+            <div class="upload-row">
+                <!-- 人物照片 -->
+                <div class="upload-card" id="personCard">
+                    <div class="upload-area" id="personUpload">
+                        <div class="upload-icon">🧍</div>
+                        <div class="upload-title">上传人物照片</div>
+                        <div class="upload-hint">正面、全身或半身照效果最佳</div>
+                        <input type="file" id="personInput" accept="image/*" hidden>
+                    </div>
+                    <img class="preview-img" id="personPreview" alt="">
+                    <button class="btn-clear" id="personClear">✕</button>
+                </div>
+
+                <!-- 加号分隔 -->
+                <div class="plus-divider">+</div>
+
+                <!-- 服装图片 -->
+                <div class="upload-card" id="clothCard">
+                    <div class="upload-area" id="clothUpload">
+                        <div class="upload-icon">👚</div>
+                        <div class="upload-title">上传服装图片</div>
+                        <div class="upload-hint">最好是平铺或模特正面图</div>
+                        <input type="file" id="clothInput" accept="image/*" hidden>
+                    </div>
+                    <img class="preview-img" id="clothPreview" alt="">
+                    <button class="btn-clear" id="clothClear">✕</button>
+                </div>
+            </div>
+
+            <button class="btn-generate" id="btnTryOn" disabled>
+                🔑 需要 API Key 才能使用
+            </button>
+            <div class="tryon-note" id="tryonNote">
+                ⚠️ <strong>虚拟试穿需要 Replicate API Key</strong>（付费功能，按次计费）
+                <br>1️⃣ 去 <a href="https://replicate.com/signin" target="_blank">replicate.com</a> 注册账号
+                <br>2️⃣ 在 <a href="https://replicate.com/account/api-tokens" target="_blank">API Tokens</a> 页面创建 Key
+                <br>3️⃣ 拿到 Key 后在下方输入即可解锁试穿功能
+                <br><br>
+                <label for="apiKeyInput" style="font-weight:600;">输入你的 API Key：</label>
+                <div class="api-key-row">
+                    <input type="password" id="apiKeyInput" class="api-key-input"
+                           placeholder="r8_xxxxxxxxxxxx">
+                    <button class="btn-save-key" id="btnSaveKey">保存</button>
+                </div>
+                <span class="api-key-msg" id="apiKeyMsg"></span>
+                <br><small style="color:#94a3b8;">🔒 Key 只保存在你的浏览器里，不会上传到任何服务器</small>
+            </div>
+
+            <!-- 结果区 -->
+            <div class="result-section" id="tryonResult" style="display:none;">
+                <h3>试穿效果</h3>
+                <div class="result-card">
+                    <div class="result-images">
+                        <div><span>原图</span><img id="tryonPersonThumb" alt=""></div>
+                        <div><span>服装</span><img id="tryonClothThumb" alt=""></div>
+                        <div><span>✨ 试穿效果</span><img id="tryonOutput" alt=""></div>
+                    </div>
+                    <a class="btn-download" id="tryonDownload" download="tryon_result.png">📥 下载结果</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== Tab 2: 一键抠图 ===== -->
+        <section class="tab-panel" id="panel-removebg">
+            <div class="hero">
+                <h1>一键抠图，背景秒消失</h1>
+                <p>上传任意图片，AI 自动去除背景，生成透明 PNG</p>
+            </div>
+
+            <div class="upload-row single">
+                <div class="upload-card" id="bgCard">
+                    <div class="upload-area" id="bgUpload">
+                        <div class="upload-icon">🖼️</div>
+                        <div class="upload-title">上传图片</div>
+                        <div class="upload-hint">人像、物品、宠物…都能抠</div>
+                        <input type="file" id="bgInput" accept="image/*" hidden>
+                    </div>
+                    <img class="preview-img" id="bgPreview" alt="">
+                    <button class="btn-clear" id="bgClear">✕</button>
+                </div>
+            </div>
+
+            <button class="btn-generate" id="btnRemoveBg" disabled>
+                ✂️ 一键抠图
+            </button>
+            <p class="feature-note">✅ 免费，浏览器本地运行，无需任何 API Key</p>
+
+            <!-- 结果区 -->
+            <div class="result-section" id="bgResult" style="display:none;">
+                <h3>抠图结果</h3>
+                <div class="result-card">
+                    <div class="compare-row">
+                        <div class="compare-item">
+                            <span class="compare-label">原图</span>
+                            <div class="compare-img-wrapper">
+                                <img id="bgOriginal" alt="">
+                            </div>
+                        </div>
+                        <div class="compare-item">
+                            <span class="compare-label">✨ 去背景</span>
+                            <div class="compare-img-wrapper checker-bg">
+                                <img id="bgOutput" alt="">
+                            </div>
+                        </div>
+                    </div>
+                    <a class="btn-download" id="bgDownload" download="nobg_result.png">📥 下载 PNG</a>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ======== Loading 遮罩 ======== -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-box">
+            <div class="spinner"></div>
+            <p id="loadingText">AI 处理中，请稍候...</p>
+            <p class="progress-sub" id="loadingSub"></p>
+        </div>
+    </div>
+
+    <!-- ======== Toast 提示 ======== -->
+    <div class="toast" id="toast"></div>
+
+    <!-- ======== 抠图引擎（CDN 加载，首次自动下载模型 ~40MB） ======== -->
+    <script src="https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/background-removal.iife.js">
+    </script>
+
+    <script src="main.js"></script>
+</body>
+</html>
