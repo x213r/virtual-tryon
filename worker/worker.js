@@ -28,10 +28,9 @@ export default {
       return new Response("Send a POST with image binary", { status: 405 });
     }
 
-    const HF_TOKEN = env.HF_TOKEN;
-    if (!HF_TOKEN) {
-      return new Response("Worker not configured: HF_TOKEN secret missing", { status: 500 });
-    }
+    // 🔒 Token 设为 Cloudflare Secret（wrangler secret put HF_TOKEN）
+    //    或直接在下方替换（服务端代码，不会暴露给前端）
+    const HF_TOKEN = env.HF_TOKEN || "hf_你的Token填这里";
 
     const hfUrl = "https://api-inference.huggingface.co/models/not-lain/rembg";
 
