@@ -527,6 +527,9 @@ function setupWatermarkCanvas(img) {
     canvas.ontouchstart = (e) => { e.preventDefault(); wmIsDrawing = true; wmDraw(e.touches[0]); };
     canvas.ontouchmove = (e) => { e.preventDefault(); if (wmIsDrawing) wmDraw(e.touches[0]); };
     canvas.ontouchend = () => { wmIsDrawing = false; };
+
+    // 设置自定义圆形光标
+    updateWmCursor();
 }
 
 function wmDraw(e) {
@@ -542,13 +545,51 @@ function wmDraw(e) {
     wmMaskCtx.fillStyle = wmCurrentTool === "brush" ? "white" : "black";
     wmMaskCtx.fill();
 
-    // 在显示层画半透明提示
+    // 在显示层画视觉提示
     wmDisplayCtx.beginPath();
     wmDisplayCtx.arc(x, y, wmBrushSize / 2, 0, Math.PI * 2);
-    wmDisplayCtx.fillStyle = wmCurrentTool === "brush"
-        ? "rgba(255, 0, 0, 0.35)"  // 红色=标记水印
-        : "rgba(0, 0, 0, 0.01)";   // 透明=橡皮擦
-    wmDisplayCtx.fill();
+    if (wmCurrentTool === "brush") {
+        // 红色半透明 = 标记水印区域
+        wmDisplayCtx.fillStyle = "rgba(255, 0, 0, 0.35)";
+        wmDisplayCtx.fill();
+    } else {
+        // 橡皮擦：恢复显示原图
+        wmDisplayCtx.save();
+        wmDisplayCtx.clip();
+        wmDisplayCtx.drawImage(wmImage, 0, 0, wmDisplayCanvas.width, wmDisplayCanvas.height);
+        wmDisplayCtx.restore();
+    }
+}
+
+// 自定义圆形光标
+function updateWmCursor() {
+    const size = wmBrushSize + 4;
+    const cursorCanvas = document.createElement("canvas");
+    cursorCanvas.width = size;
+    cursorCanvas.height = size;
+    const ctx = cursorCanvas.getContext("2d");
+    const cx = size / 2, cy = size / 2, r = wmBrushSize / 2;
+    const color = wmCurrentTool === "brush" ? "#ef4444" : "#64748b";
+
+    // 虚线圆
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.stroke();
+
+    // 中心十字
+    ctx.beginPath();
+    ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
+    ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.stroke();
+
+    const dataUrl = cursorCanvas.toDataURL();
+    wmDisplayCanvas.style.cursor = `url(${dataUrl}) ${cx} ${cy}, crosshair`;
 }
 
 // 工具切换
@@ -557,6 +598,7 @@ $$(".wm-tool-btn").forEach(btn => {
         $$(".wm-tool-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         wmCurrentTool = btn.dataset.tool;
+        if (wmDisplayCanvas) updateWmCursor();
     });
 });
 
@@ -564,6 +606,7 @@ $$(".wm-tool-btn").forEach(btn => {
 $("#wmBrushSize").addEventListener("input", (e) => {
     wmBrushSize = parseInt(e.target.value);
     $("#wmBrushSizeVal").textContent = wmBrushSize + "px";
+    if (wmDisplayCanvas) updateWmCursor();
 });
 
 // 去除水印按钮
