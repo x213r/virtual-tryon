@@ -404,7 +404,7 @@ $("#btnRemoveBg").addEventListener("click", async () => {
 
     try {
         const resultBlob = await removeBackground(bgFile, {
-            model: "small",
+            model: "isnet_quint8",
             output: {
                 type: "image/png",
                 quality: 1.0,
