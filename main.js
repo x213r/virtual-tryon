@@ -739,7 +739,7 @@ function autoDetectWatermarks() {
     return Math.round(markedCount / 100); // 近似水印数量
 }
 
-// Telea 像素修复算法（改进版）
+// 改进版加权采样修复（边缘优先 + 多轮填充 + 颜色相似度加权）
 function inpaintWatermarkTelea() {
     const w = wmDisplayCanvas.width, h = wmDisplayCanvas.height;
     wmDisplayCtx.drawImage(wmImage, 0, 0, w, h);
@@ -748,104 +748,97 @@ function inpaintWatermarkTelea() {
     const maskData = wmMaskCtx.getImageData(0, 0, w, h);
     const mask = maskData.data;
 
-    // 初始化：-1=未知需填充, 0=已知源像素, >0=待填充距离
-    const flag = new Int32Array(w * h);
-    const dist = new Float32Array(w * h);
-    const known = []; // BFS 队列
-
-    for (let i = 0; i < w * h; i++) {
-        if (mask[i * 4] < 128) {
-            flag[i] = 0; // 已知
-        } else {
-            flag[i] = -1; // 待填充
-        }
-    }
-
-    // 找到所有边界像素（待填充但邻居有已知像素）
-    const boundary = [];
-    for (let y = 1; y < h - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
-            const i = y * w + x;
-            if (flag[i] === -1) {
-                let hasKnown = false;
-                for (let dy = -1; dy <= 1 && !hasKnown; dy++) {
-                    for (let dx = -1; dx <= 1 && !hasKnown; dx++) {
-                        if (flag[(y + dy) * w + (x + dx)] === 0) hasKnown = true;
-                    }
-                }
-                if (hasKnown) {
-                    flag[i] = 1;
-                    dist[i] = 0;
-                    boundary.push(i);
-                }
+    // 收集所有需要填充的像素
+    const allMasked = [];
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (mask[(y * w + x) * 4] > 128) {
+                allMasked.push(y * w + x);
             }
         }
     }
 
-    if (boundary.length === 0) {
+    if (allMasked.length === 0) {
         return new Promise(resolve => wmDisplayCanvas.toBlob(blob => resolve(blob), "image/png"));
     }
 
-    // BFS 从边界向内传播
-    let queue = [...boundary];
-    let head = 0;
-    while (head < queue.length) {
-        const i = queue[head++];
-        const x = i % w, y = Math.floor(i / w);
-        const curDist = dist[i];
+    // 逐轮填充：每轮只填充边缘像素，然后扩展边缘
+    const maxPasses = 20;
+    const searchRadius = 12;
+    const filled = new Uint8Array(w * h); // 本轮已填充标记
 
-        for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-                if (dx === 0 && dy === 0) continue;
-                const nx = x + dx, ny = y + dy;
-                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                const ni = ny * w + nx;
+    for (let pass = 0; pass < maxPasses; pass++) {
+        const toFillThisPass = [];
+        const remaining = [];
 
-                if (flag[ni] === -1) {
-                    flag[ni] = curDist + 1;
-                    dist[ni] = curDist + 1;
-                    queue.push(ni);
+        for (const i of allMasked) {
+            if (filled[i]) continue;
+            // 检查是否有已知邻居（原始已知 或 前几轮已填充）
+            const x = i % w, y = Math.floor(i / w);
+            let hasKnown = false;
+            for (let dy = -1; dy <= 1 && !hasKnown; dy++) {
+                for (let dx = -1; dx <= 1 && !hasKnown; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    const ni = ny * w + nx;
+                    if (mask[ni * 4] < 128 || filled[ni]) {
+                        hasKnown = true;
+                    }
                 }
             }
+            if (hasKnown) {
+                toFillThisPass.push(i);
+            } else {
+                remaining.push(i);
+            }
         }
-    }
 
-    // 按距离排序，从小到大填充（边缘优先）
-    const fillOrder = [];
-    for (let i = 0; i < w * h; i++) {
-        if (flag[i] > 0) fillOrder.push(i);
-    }
-    fillOrder.sort((a, b) => flag[a] - flag[b]);
+        if (toFillThisPass.length === 0) break; // 没有更多可填充的
 
-    // 填充每个像素
-    const radius = 15;
-    for (const idx of fillOrder) {
-        const x = idx % w, y = Math.floor(idx / w);
-        let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
+        // 填充本轮像素
+        for (const idx of toFillThisPass) {
+            const x = idx % w, y = Math.floor(idx / w);
+            let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
+            const si = idx * 4;
+            const srcR = src[si], srcG = src[si + 1], srcB = src[si + 2];
 
-        for (let dy = -radius; dy <= radius; dy++) {
-            for (let dx = -radius; dx <= radius; dx++) {
-                const nx = x + dx, ny = y + dy;
-                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                const ni = ny * w + nx;
-                if (flag[ni] === 0) { // 已知像素
+            for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+                for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    const ni = ny * w + nx;
+                    // 只采样已知像素
+                    if (mask[ni * 4] > 128 && !filled[ni]) continue;
+
                     const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist === 0) continue;
-                    const weight = 1 / (dist * dist);
-                    rSum += src[ni * 4] * weight;
-                    gSum += src[ni * 4 + 1] * weight;
-                    bSum += src[ni * 4 + 2] * weight;
+                    if (dist < 1) continue; // 不采样自己
+                    if (dist > searchRadius) continue;
+
+                    // 颜色相似度权重（采样与周围像素相近的颜色）
+                    const ns = src[ni * 4], ng = src[ni * 4 + 1], nb = src[ni * 4 + 2];
+                    const colorDiff = Math.sqrt(
+                        (ns - srcR) ** 2 + (ng - srcG) ** 2 + (nb - srcB) ** 2
+                    ) / 255;
+                    const colorWeight = 1 / (1 + colorDiff * 3);
+
+                    // 距离权重（近的权重大）
+                    const distWeight = 1 / (dist * dist);
+
+                    const weight = distWeight * colorWeight;
+                    rSum += ns * weight;
+                    gSum += ng * weight;
+                    bSum += nb * weight;
                     wSum += weight;
                 }
             }
-        }
 
-        if (wSum > 0) {
-            const si = idx * 4;
-            src[si] = Math.round(rSum / wSum);
-            src[si + 1] = Math.round(gSum / wSum);
-            src[si + 2] = Math.round(bSum / wSum);
-            flag[idx] = 0; // 标记为已知，供后续像素采样
+            if (wSum > 0) {
+                src[si] = Math.round(rSum / wSum);
+                src[si + 1] = Math.round(gSum / wSum);
+                src[si + 2] = Math.round(bSum / wSum);
+                filled[idx] = 1;
+            }
         }
     }
 
